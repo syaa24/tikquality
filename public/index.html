@@ -73,6 +73,12 @@
       <!-- Hasil Inspeksi Sebelum vs Sesudah -->
       <div id="verifyResult" class="hidden grid grid-cols-1 md:grid-cols-2 gap-4"></div>
 
+      <!-- Preview Video Langsung di Browser -->
+      <div id="previewBox" class="hidden bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Preview Output Video (Browser)</div>
+        <video id="outputPreview" controls playsinline class="w-full max-h-[420px] rounded-lg bg-black"></video>
+      </div>
+
       <!-- Terminal Output -->
       <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
         <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Console Log (Python)</div>
@@ -80,7 +86,7 @@
       </div>
     </section>
 
-    <!-- TAB 2: TIKTOK URL CHECKER (ALA GAMBAR 1) -->
+    <!-- TAB 2: TIKTOK URL CHECKER -->
     <section id="tab-checker" class="hidden space-y-5">
       <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
         <label class="block text-sm font-medium text-slate-300">Link Video TikTok (Sudah di-upload)</label>
@@ -118,6 +124,6 @@
     </section>
   </div>
 
-  <script src="/app.js"></script>
+  <script src="/app.js?v=3"></script>
 </body>
 </html>
