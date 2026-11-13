@@ -3,25 +3,41 @@ importScripts("https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js");
 
 let pyodide = null;
 
+function formatErr(err) {
+  if (!err) return "Unknown error";
+  if (typeof err === "string") return err;
+  return err.message || err.reason || err.type || JSON.stringify(err) || String(err);
+}
+
 async function initPyodide() {
   if (pyodide) return pyodide;
 
   postMessage({ type: "status", message: "Memuat Python (Pyodide)..." });
-  pyodide = await loadPyodide();
+
+  try {
+    pyodide = await loadPyodide({
+      indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/",
+    });
+  } catch (e1) {
+    postMessage({ type: "status", message: "Mencoba ulang memuat Pyodide..." });
+    pyodide = await loadPyodide({
+      indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/",
+    });
+  }
 
   pyodide.FS.mkdirTree("/home/pyodide/tiktok_quality/mp4");
 
   const files = [
     ["/py/tiktok_quality/__init__.py", "/home/pyodide/tiktok_quality/__init__.py"],
-    ["/py/tiktok_quality/transform.py", "/home/py/tiktok_quality/transform.py"],
-    ["/py/tiktok_quality/mp4/__init__.py", "/home/py/tiktok_quality/mp4/__init__.py"],
-    ["/py/tiktok_quality/mp4/parser.py", "/home/py/tiktok_quality/mp4/parser.py"],
-    ["/py/tiktok_quality/mp4/builder.py", "/home/py/tiktok_quality/mp4/builder.py"],
+    ["/py/tiktok_quality/transform.py", "/home/pyodide/tiktok_quality/transform.py"],
+    ["/py/tiktok_quality/mp4/__init__.py", "/home/pyodide/tiktok_quality/mp4/__init__.py"],
+    ["/py/tiktok_quality/mp4/parser.py", "/home/pyodide/tiktok_quality/mp4/parser.py"],
+    ["/py/tiktok_quality/mp4/builder.py", "/home/pyodide/tiktok_quality/mp4/builder.py"],
   ];
 
   for (const [url, dest] of files) {
     const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) throw new Error(`Gagal memuat ${url} (${res.status})`);
+    if (!res.ok) throw new Error(`Gagal memuat ${url} (HTTP ${res.status})`);
     const text = await res.text();
     pyodide.FS.writeFile(dest, text);
   }
@@ -234,10 +250,10 @@ onmessage = async (e) => {
       postMessage({ type: "inspected", info });
     }
   } catch (err) {
-    postMessage({ type: "error", error: err.message || String(err) });
+    postMessage({ type: "error", error: formatErr(err) });
   }
 };
 
 initPyodide().catch((err) => {
-  postMessage({ type: "error", error: "Gagal inisialisasi Pyodide: " + err.message });
+  postMessage({ type: "error", error: "Gagal inisialisasi Pyodide: " + formatErr(err) });
 });
