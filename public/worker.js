@@ -9,7 +9,6 @@ async function initPyodide() {
   postMessage({ type: "status", message: "Memuat Python (Pyodide)..." });
   pyodide = await loadPyodide();
 
-  // Buat struktur package tiktok_quality di virtual filesystem Pyodide
   pyodide.FS.mkdirTree("/home/pyodide/tiktok_quality/mp4");
 
   const files = [
@@ -21,36 +20,57 @@ async function initPyodide() {
   ];
 
   for (const [url, dest] of files) {
-    const res = await fetch(url);
+    const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw new Error(`Gagal memuat ${url} (${res.status})`);
     const text = await res.text();
     pyodide.FS.writeFile(dest, text);
   }
 
-  // Wrapper helper Python untuk menjalankan transform & inspect MP4
   await pyodide.runPythonAsync(`
 import io, os, sys, struct, json
 from tiktok_quality.transform import transform, PADDING_NAL
 from tiktok_quality.mp4.parser import (
     find_box, find_box_path, find_track_by_handler,
-    parse_stsz, parse_stts, read_u32, read_u16
+    parse_stsz, parse_stts, parse_stco, parse_stsc, read_u32, read_u16
 )
+
+def _debug_mp4_info(label, raw_bytes):
+    try:
+        moov_pos, moov_size = find_box(raw_bytes, "moov")
+        vt_pos, vt_size = find_track_by_handler(raw_bytes, moov_pos, moov_size, b"vide")
+        stbl_pos, stbl_size = find_box_path(raw_bytes, ["mdia", "minf", "stbl"], vt_pos + 8, vt_pos + vt_size)
+        sb_s, sb_e = stbl_pos + 8, stbl_pos + stbl_size
+        stco_pos, _ = find_box(raw_bytes, "stco", sb_s, sb_e)
+        stsc_pos, _ = find_box(raw_bytes, "stsc", sb_s, sb_e)
+        stsd_pos, stsd_size = find_box(raw_bytes, "stsd", sb_s, sb_e)
+        stsd_c = raw_bytes[stsd_pos + 8:stsd_pos + stsd_size]
+        avcc_rel = stsd_c.find(b"avcC")
+        avcc_len = read_u32(stsd_c, avcc_rel - 4) if avcc_rel >= 4 else 0
+        avcc_tail = stsd_c[avcc_rel - 4 + avcc_len - 8:avcc_rel - 4 + avcc_len].hex() if avcc_len >= 8 else ""
+        chunks = parse_stco(raw_bytes, stco_pos)
+        stsc = parse_stsc(raw_bytes, stsc_pos)
+        print(f"[debug:{label}] chunks={len(chunks)}, stsc[:3]={stsc[:3]}, avcC_len={avcc_len}, avcC_tail={avcc_tail}")
+    except Exception as ex:
+        print(f"[debug:{label}] {ex}")
 
 def run_transform_web(input_bytes, multiplier, comment):
     in_path = "/tmp/input.mp4"
     out_path = "/tmp/output.mp4"
+    raw_in = bytes(input_bytes)
     with open(in_path, "wb") as f:
-        f.write(bytes(input_bytes))
+        f.write(raw_in)
 
     buf = io.StringIO()
     old_out, old_err = sys.stdout, sys.stderr
     sys.stdout = buf
     sys.stderr = buf
     try:
+        _debug_mp4_info("in", raw_in)
         stats = transform(in_path, out_path, multiplier=int(multiplier), comment=str(comment), verbose=True)
         with open(out_path, "rb") as f:
             out_bytes = f.read()
-        info_before = inspect_mp4_bytes(bytes(input_bytes))
+        _debug_mp4_info("out", out_bytes)
+        info_before = inspect_mp4_bytes(raw_in)
         info_after = inspect_mp4_bytes(out_bytes)
         return {
             "ok": True,
@@ -117,7 +137,6 @@ def inspect_mp4_bytes(data):
             v_bytes = sum(s for s in sizes if s != 8)
             v_bitrate_mbps = round((v_bytes * 8) / duration_sec / 1_000_000, 2)
 
-    # Audio handler
     audio_handler = "-"
     if moov_pos is not None:
         at_pos, at_size = find_track_by_handler(data, moov_pos, moov_size, b"soun")
@@ -126,7 +145,6 @@ def inspect_mp4_bytes(data):
             if hdlr_pos is not None:
                 audio_handler = data[hdlr_pos + 32:hdlr_pos + hdlr_size].split(b"\\x00")[0].decode("utf-8", "replace")
 
-    # Comment tag
     if moov_pos is not None:
         udta_pos, udta_size = find_box(data, "udta", moov_pos + 8, moov_pos + moov_size)
         if udta_pos is not None:
