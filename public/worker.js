@@ -109,8 +109,9 @@ def inspect_mp4_bytes(data):
         fps = round(timescale / delta, 2) if delta else 0
 
         stsd_content = data[stsd_pos + 8:stsd_pos + stsd_size]
-        width = read_u16(stsd_content, 48)
-        height = read_u16(stsd_content, 50)
+        if len(stsd_content) >= 44:
+            width = read_u16(stsd_content, 40)
+            height = read_u16(stsd_content, 42)
         avcc_ext = b"\\xfd\\xf8\\xf8\\x00" in stsd_content
         if duration_sec > 0:
             v_bytes = sum(s for s in sizes if s != 8)
