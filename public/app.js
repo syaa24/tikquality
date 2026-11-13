@@ -1,4 +1,4 @@
-const worker = new Worker("/worker.js");
+const worker = new Worker("/worker.js?v=3");
 
 const pyStatus = document.getElementById("pyStatus");
 const videoInput = document.getElementById("videoInput");
@@ -9,6 +9,8 @@ const inspectOnlyBtn = document.getElementById("inspectOnlyBtn");
 const downloadBtn = document.getElementById("downloadBtn");
 const consoleLog = document.getElementById("consoleLog");
 const verifyResult = document.getElementById("verifyResult");
+const previewBox = document.getElementById("previewBox");
+const outputPreview = document.getElementById("outputPreview");
 
 let pyReady = false;
 let currentDownloadUrl = null;
@@ -73,6 +75,9 @@ worker.onmessage = (e) => {
     downloadBtn.download = outName;
     downloadBtn.classList.remove("hidden");
 
+    previewBox.classList.remove("hidden");
+    outputPreview.src = currentDownloadUrl;
+
     renderCompareVerify(msg.before, msg.after);
     updateButtons();
   } else if (msg.type === "inspected") {
@@ -85,6 +90,7 @@ transformBtn.addEventListener("click", async () => {
   const file = videoInput.files[0];
   if (!file) return;
   downloadBtn.classList.add("hidden");
+  previewBox.classList.add("hidden");
   transformBtn.disabled = true;
   consoleLog.textContent = `[*] Membaca ${file.name} (${file.size.toLocaleString()} bytes)...`;
 
