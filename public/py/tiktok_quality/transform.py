@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import struct
-import sys
 
 from .mp4.parser import (
     find_box, find_box_path, find_track_by_handler,
@@ -40,6 +39,9 @@ def transform(input_path: str, output_path: str, multiplier: int = 10,
     Returns:
         Dict with stats about the transformation.
     """
+    if multiplier < 1:
+        raise ValueError("Multiplier minimal bernilai 1.")
+
     with open(input_path, 'rb') as f:
         data = f.read()
 
@@ -47,23 +49,30 @@ def transform(input_path: str, output_path: str, multiplier: int = 10,
     if verbose:
         print(f"[*] Input: {input_path} ({file_size:,} bytes)")
 
-    # Parse source
+    # Parse top-level boxes
     moov_pos, moov_size = find_box(data, 'moov')
     mdat_pos, mdat_size = find_box(data, 'mdat')
     if moov_pos is None or mdat_pos is None:
-        print("[!] ERROR: Missing moov or mdat box", file=sys.stderr)
-        sys.exit(1)
+        raise ValueError("Missing moov or mdat box (file MP4 tidak valid).")
 
     mdat_data_start = mdat_pos + 8
+
+    # MVHD
+    mvhd_pos, mvhd_size = find_box(data, 'mvhd', moov_pos + 8, moov_pos + moov_size)
+    if mvhd_pos is None:
+        raise ValueError("Missing mvhd box.")
+    mvhd_content = data[mvhd_pos + 8:mvhd_pos + mvhd_size]
+    mvhd_timescale = read_u32(mvhd_content, 12) or 1000
 
     # Video track
     vt_pos, vt_size = find_track_by_handler(data, moov_pos, moov_size, b'vide')
     if vt_pos is None:
-        print("[!] ERROR: No video track found", file=sys.stderr)
-        sys.exit(1)
+        raise ValueError("No video track found.")
 
     vt_start, vt_end = vt_pos + 8, vt_pos + vt_size
     stbl_pos, stbl_size = find_box_path(data, ['mdia', 'minf', 'stbl'], vt_start, vt_end)
+    if stbl_pos is None:
+        raise ValueError("Missing video stbl box.")
     sb_start, sb_end = stbl_pos + 8, stbl_pos + stbl_size
 
     stco_pos, _ = find_box(data, 'stco', sb_start, sb_end)
@@ -75,23 +84,33 @@ def transform(input_path: str, output_path: str, multiplier: int = 10,
     sdtp_pos, sdtp_size = find_box(data, 'sdtp', sb_start, sb_end)
     ctts_pos, ctts_size = find_box(data, 'ctts', sb_start, sb_end)
 
+    if stco_pos is None:
+        raise ValueError("Box stco tidak ditemukan (file mungkin memakai co64 / >4GB).")
+    if None in (stsz_pos, stsc_pos, stts_pos, stsd_pos):
+        raise ValueError("Tabel sample video (stsz/stsc/stts/stsd) tidak lengkap.")
+
     video_chunks = parse_stco(data, stco_pos)
     video_sizes = parse_stsz(data, stsz_pos)
     video_stsc = parse_stsc(data, stsc_pos)
     video_stts = parse_stts(data, stts_pos)
 
+    if not video_chunks or not video_sizes or not video_stts:
+        raise ValueError("Video track tidak memiliki frame/chunk.")
+
     orig_frames = len(video_sizes)
-    time_delta = video_stts[0][1]
+    time_delta = video_stts[0][1] or 1
     pad_count = orig_frames * (multiplier - 1)
     total_frames = orig_frames + pad_count
 
     v_mdhd_pos, v_mdhd_size = find_box_path(data, ['mdia', 'mdhd'], vt_start, vt_end)
-    v_timescale = read_u32(data, v_mdhd_pos + 20)
+    if v_mdhd_pos is None:
+        raise ValueError("Missing video mdhd box.")
+    v_timescale = read_u32(data, v_mdhd_pos + 20) or 1
     v_duration = read_u32(data, v_mdhd_pos + 24)
-    v_duration_sec = v_duration / v_timescale
+    v_duration_sec = v_duration / v_timescale if v_duration > 0 else (orig_frames * time_delta / v_timescale)
 
     if verbose:
-        fps = v_timescale / time_delta
+        fps = (orig_frames / v_duration_sec) if v_duration_sec > 0 else (v_timescale / time_delta)
         print(f"[*] Video: {orig_frames} frames @ {fps:.0f} fps, {v_duration_sec:.1f}s")
         print(f"[*] Ghost frames: +{pad_count} -> {total_frames} declared")
 
@@ -109,14 +128,24 @@ def transform(input_path: str, output_path: str, multiplier: int = 10,
     if verbose:
         print(f"[*] First sample: {first_size} -> {new_first_size} bytes (-{sei_removed} SEI)")
 
+    # Validate video stsd / avcC early before building boxes
+    stsd_content = data[stsd_pos + 8:stsd_pos + stsd_size]
+    avcc_rel = stsd_content.find(b'avcC')
+    if avcc_rel < 4:
+        raise ValueError("Codec bukan H.264/AVC (box avcC tidak ditemukan). Convert ke H.264 terlebih dahulu.")
+
     # Audio track
     at_pos, at_size = find_track_by_handler(data, moov_pos, moov_size, b'soun')
     has_audio = at_pos is not None
 
     if has_audio:
         at_start, at_end = at_pos + 8, at_pos + at_size
-        a_stbl_pos, _ = find_box_path(data, ['mdia', 'minf', 'stbl'], at_start, at_end)
-        a_sb_start, a_sb_end = a_stbl_pos + 8, a_stbl_pos + _
+        a_stbl_pos, a_stbl_size = find_box_path(data, ['mdia', 'minf', 'stbl'], at_start, at_end)
+        if a_stbl_pos is None:
+            has_audio = False
+
+    if has_audio:
+        a_sb_start, a_sb_end = a_stbl_pos + 8, a_stbl_pos + a_stbl_size
 
         a_stco_pos, _ = find_box(data, 'stco', a_sb_start, a_sb_end)
         a_stsz_pos, a_stsz_size = find_box(data, 'stsz', a_sb_start, a_sb_end)
@@ -126,62 +155,80 @@ def transform(input_path: str, output_path: str, multiplier: int = 10,
         a_sgpd_pos, a_sgpd_size = find_box(data, 'sgpd', a_sb_start, a_sb_end)
         a_sbgp_pos, a_sbgp_size = find_box(data, 'sbgp', a_sb_start, a_sb_end)
 
+        if None in (a_stco_pos, a_stsz_pos, a_stsc_pos, a_stts_pos, a_stsd_pos):
+            raise ValueError("Tabel sample audio tidak lengkap atau memakai co64.")
+
         audio_chunks = parse_stco(data, a_stco_pos)
         audio_sizes = parse_stsz(data, a_stsz_pos)
         audio_stts = parse_stts(data, a_stts_pos)
 
         a_mdhd_pos, a_mdhd_size = find_box_path(data, ['mdia', 'mdhd'], at_start, at_end)
-        a_timescale = read_u32(data, a_mdhd_pos + 20)
+        if a_mdhd_pos is None:
+            raise ValueError("Missing audio mdhd box.")
+        a_timescale = read_u32(data, a_mdhd_pos + 20) or 1
+        a_mdhd_dur = read_u32(data, a_mdhd_pos + 24)
 
-        # Read audio ELST for timing alignment
+        # Read audio ELST safely (fallback if missing or empty edit)
         a_elst_pos, _ = find_box_path(data, ['edts', 'elst'], at_start, at_end)
-        a_elst_seg_dur = read_u32(data, a_elst_pos + 16)  # ms
-        a_elst_media_time = read_u32(data, a_elst_pos + 20)  # ticks
+        use_elst = False
+        if a_elst_pos is not None:
+            elst_ver = data[a_elst_pos + 8]
+            elst_cnt = read_u32(data, a_elst_pos + 12)
+            if elst_ver == 0 and elst_cnt >= 1:
+                a_elst_seg_dur = read_u32(data, a_elst_pos + 16)
+                a_elst_media_time = read_u32(data, a_elst_pos + 20)
+                if a_elst_media_time != 0xFFFFFFFF and len(audio_stts) >= 1 and len(audio_sizes) >= 1:
+                    use_elst = True
 
-        new_audio_dur_ms = a_elst_seg_dur
-        new_audio_dur = new_audio_dur_ms * a_timescale // 1000
+        if use_elst:
+            new_audio_dur_ms = a_elst_seg_dur
+            new_audio_dur = new_audio_dur_ms * a_timescale // mvhd_timescale
 
-        # STTS: align to mdhd + media_time
-        a_delta = audio_stts[0][1]
-        a_count = len(audio_sizes)
-        target_stts = new_audio_dur + a_elst_media_time
-        main_n = a_count - 1
-        last_delta = target_stts - main_n * a_delta
+            a_delta = audio_stts[0][1]
+            a_count = len(audio_sizes)
+            target_stts = new_audio_dur + a_elst_media_time
+            main_n = a_count - 1
+            last_delta = target_stts - main_n * a_delta
 
-        if 0 < last_delta <= a_delta:
-            new_a_stts = [(main_n, a_delta), (1, last_delta)]
+            if 0 < last_delta <= a_delta and main_n > 0:
+                new_a_stts = [(main_n, a_delta), (1, last_delta)]
+            else:
+                new_a_stts = audio_stts
+                new_audio_dur = a_mdhd_dur
+                new_audio_dur_ms = new_audio_dur * mvhd_timescale // a_timescale
         else:
             new_a_stts = audio_stts
-            new_audio_dur = read_u32(data, a_mdhd_pos + 24)
-            new_audio_dur_ms = new_audio_dur * 1000 // a_timescale
+            new_audio_dur = a_mdhd_dur
+            new_audio_dur_ms = new_audio_dur * mvhd_timescale // a_timescale
 
         # Bitrates
         total_a_bytes = sum(audio_sizes)
-        old_a_ticks = sum(c * d for c, d in audio_stts)
-        new_a_ticks = sum(c * d for c, d in new_a_stts)
+        old_a_ticks = sum(c * d for c, d in audio_stts) or 1
+        new_a_ticks = sum(c * d for c, d in new_a_stts) or 1
         old_a_br = total_a_bytes * 8 * a_timescale // old_a_ticks
         new_a_br = total_a_bytes * 8 * a_timescale // new_a_ticks
 
     # Build new mdat
     mdat_before = data[mdat_data_start:first_off]
     mdat_after = data[first_off + first_size:mdat_pos + mdat_size]
-    new_mdat_content = mdat_before + new_first + mdat_after + PADDING_NAL
+    pad_nal = PADDING_NAL if pad_count > 0 else b''
+    new_mdat_content = mdat_before + new_first + mdat_after + pad_nal
     new_mdat = struct.pack('>I', 8 + len(new_mdat_content)) + b'mdat' + new_mdat_content
 
     # Build new moov
     ftyp = build_ftyp()
     free = build_free()
 
-    # MVHD
-    mvhd_pos, mvhd_size = find_box(data, 'mvhd', moov_pos + 8, moov_pos + moov_size)
-    mvhd_content = data[mvhd_pos + 8:mvhd_pos + mvhd_size]
-    v_tkhd_pos, _ = find_box(data, 'tkhd', vt_start, vt_end)
+    # MVHD duration
+    v_tkhd_pos, v_tkhd_size = find_box(data, 'tkhd', vt_start, vt_end)
+    if v_tkhd_pos is None:
+        raise ValueError("Missing video tkhd box.")
     v_tkhd_dur_ms = read_u32(data, v_tkhd_pos + 28)
     new_mvhd_dur = max(v_tkhd_dur_ms, new_audio_dur_ms) if has_audio else v_tkhd_dur_ms
     mvhd = build_mvhd(mvhd_content, new_mvhd_dur)
 
     # Video track components
-    video_tkhd = data[vt_start:vt_start + read_u32(data, vt_start)]
+    video_tkhd = data[v_tkhd_pos:v_tkhd_pos + v_tkhd_size]
     edts_pos, edts_size = find_box(data, 'edts', vt_start, vt_end)
     video_edts = data[edts_pos:edts_pos + edts_size] if edts_pos else b''
     video_mdhd = data[v_mdhd_pos:v_mdhd_pos + v_mdhd_size]
@@ -193,41 +240,54 @@ def transform(input_path: str, output_path: str, multiplier: int = 10,
     video_dinf = data[dinf_pos:dinf_pos + dinf_size]
 
     # Video STSD (avcC + btrt patched)
-    stsd_content = data[stsd_pos + 8:stsd_pos + stsd_size]
     avc1_fixed = stsd_content[16:94]
 
-    avcc_rel = stsd_content.find(b'avcC')
     avcc_start = avcc_rel - 4
     avcc_orig_size = read_u32(stsd_content, avcc_start)
     avcc_new = build_avcc(stsd_content[avcc_start + 8:avcc_start + avcc_orig_size])
 
     colr_box = b''
     colr_rel = stsd_content.find(b'colr')
-    if colr_rel >= 0:
+    if colr_rel >= 4:
         cs = colr_rel - 4
         colr_box = stsd_content[cs:cs + read_u32(stsd_content, cs)]
 
     pasp_box = b''
     pasp_rel = stsd_content.find(b'pasp')
-    if pasp_rel >= 0:
+    if pasp_rel >= 4:
         ps = pasp_rel - 4
         pasp_box = stsd_content[ps:ps + read_u32(stsd_content, ps)]
 
     total_v_bytes = sum(video_sizes) - first_size + new_first_size
-    new_v_avg_br = int(total_v_bytes * 8 / v_duration_sec)
+    new_v_avg_br = int(total_v_bytes * 8 / v_duration_sec) if v_duration_sec > 0 else 0
     btrt_rel = stsd_content.find(b'btrt')
     max_br = read_u32(stsd_content, btrt_rel + 8) if btrt_rel >= 0 else new_v_avg_br
     btrt_new = build_btrt(0, max_br, new_v_avg_br)
 
     video_stsd_new = build_stsd_video(avc1_fixed, avcc_new, colr_box, pasp_box, btrt_new)
 
-    # Video tables
-    video_stts_new = build_stts([(orig_frames, time_delta), (pad_count, time_delta)])
+    # Video tables (handle both CFR & VFR)
+    if len(video_stts) == 1:
+        stts_entries = [(orig_frames, time_delta)]
+        if pad_count > 0:
+            stts_entries.append((pad_count, time_delta))
+    else:
+        stts_entries = list(video_stts)
+        if pad_count > 0:
+            stts_entries.append((pad_count, video_stts[-1][1] or time_delta))
+
+    video_stts_new = build_stts(stts_entries)
     video_stss = data[stss_pos:stss_pos + stss_size] if stss_pos else b''
     video_sdtp = data[sdtp_pos:sdtp_pos + sdtp_size] if sdtp_pos else b''
     video_ctts = data[ctts_pos:ctts_pos + ctts_size] if ctts_pos else b''
-    video_stsc_new = build_stsc(list(video_stsc) + [(len(video_chunks) + 1, 1, 1)])
-    video_stsz_new = build_stsz([new_first_size] + video_sizes[1:] + [PADDING_SIZE] * pad_count)
+
+    stsc_entries = list(video_stsc)
+    if pad_count > 0:
+        stsc_entries.append((len(video_chunks) + 1, 1, 1))
+    video_stsc_new = build_stsc(stsc_entries)
+
+    stsz_entries = [new_first_size] + video_sizes[1:] + ([PADDING_SIZE] * pad_count if pad_count > 0 else [])
+    video_stsz_new = build_stsz(stsz_entries)
 
     # STCO placeholder
     total_v_chunks = len(video_chunks) + pad_count
@@ -235,9 +295,12 @@ def transform(input_path: str, output_path: str, multiplier: int = 10,
     v_stco_ph = struct.pack('>I', stco_ph_size) + b'stco' + b'\x00' * (stco_ph_size - 8)
 
     v_stbl_parts = [video_stsd_new, video_stts_new]
-    if video_stss: v_stbl_parts.append(video_stss)
-    if video_sdtp: v_stbl_parts.append(video_sdtp)
-    if video_ctts: v_stbl_parts.append(video_ctts)
+    if video_stss:
+        v_stbl_parts.append(video_stss)
+    if video_sdtp:
+        v_stbl_parts.append(video_sdtp)
+    if video_ctts:
+        v_stbl_parts.append(video_ctts)
     v_stbl_parts += [video_stsc_new, video_stsz_new, v_stco_ph]
 
     video_stbl = build_box('stbl', b''.join(v_stbl_parts))
@@ -264,12 +327,13 @@ def transform(input_path: str, output_path: str, multiplier: int = 10,
 
         # Patch audio stsd bitrate
         audio_stsd = bytearray(data[a_stsd_pos:a_stsd_pos + a_stsd_size])
-        old_br = struct.pack('>I', old_a_br)
-        new_br = struct.pack('>I', new_a_br)
-        p = 0
-        while (idx := audio_stsd.find(old_br, p)) != -1:
-            audio_stsd[idx:idx + 4] = new_br
-            p = idx + 4
+        if old_a_br != new_a_br:
+            old_br = struct.pack('>I', old_a_br)
+            new_br = struct.pack('>I', new_a_br)
+            p = 0
+            while (idx := audio_stsd.find(old_br, p)) != -1:
+                audio_stsd[idx:idx + 4] = new_br
+                p = idx + 4
         audio_stsd = bytes(audio_stsd)
 
         audio_stts_new = build_stts(new_a_stts)
@@ -295,7 +359,7 @@ def transform(input_path: str, output_path: str, multiplier: int = 10,
     moov_size_final = len(moov)
 
     # Fill STCO offsets
-    new_mdat_start = 32 + 8 + moov_size_final + 8
+    new_mdat_start = len(ftyp) + len(free) + moov_size_final + 8
     first_video_rel = first_off - mdat_data_start
     pad_abs = new_mdat_start + len(new_mdat_content) - PADDING_SIZE
 
@@ -303,15 +367,16 @@ def transform(input_path: str, output_path: str, multiplier: int = 10,
     for off in video_chunks:
         rel = off - mdat_data_start
         new_v_offsets.append(new_mdat_start + rel if rel <= first_video_rel
-                            else new_mdat_start + rel - sei_removed)
-    new_v_offsets.extend([pad_abs] * pad_count)
+                             else new_mdat_start + rel - sei_removed)
+    if pad_count > 0:
+        new_v_offsets.extend([pad_abs] * pad_count)
 
     new_a_offsets = []
     if has_audio:
         for off in audio_chunks:
             rel = off - mdat_data_start
             new_a_offsets.append(new_mdat_start + rel if rel < first_video_rel
-                                else new_mdat_start + rel - sei_removed)
+                                 else new_mdat_start + rel - sei_removed)
 
     # Rebuild with final STCOs
     v_stbl_parts[-1] = build_stco(new_v_offsets)
