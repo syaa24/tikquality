@@ -25,10 +25,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    // 1. Coba ambil data langsung dari HTML rehydration TikTok (paling lengkap: bitrateInfo, GearName, VQScore jika ada)
     const htmlData = await fetchFromTikTokHtml(url).catch(() => null);
-
-    // 2. Ambil data dari TikWM public API sebagai pelengkap / fallback
     const tikwmRes = await fetch(
       `https://www.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`
     );
@@ -52,30 +49,45 @@ exports.handler = async (event) => {
     const author = item.author || tw?.author || {};
     const music = item.music || tw?.music_info || {};
 
-    // Cari info stream kualitas tertinggi dari bitrateInfo TikTok
-    let bestStream = null;
-    if (Array.isArray(video.bitrateInfo) && video.bitrateInfo.length > 0) {
-      const sorted = [...video.bitrateInfo].sort((a, b) => (b.Bitrate || 0) - (a.Bitrate || 0));
-      const top = sorted[0];
-      const addr = top.PlayAddr || {};
-      bestStream = {
-        gearName: top.GearName || "unknown",
-        qualityType: top.QualityType ?? null,
-        bitrateMbps: top.Bitrate ? (top.Bitrate / 1_000_000).toFixed(1) : null,
-        codec: top.CodecType || "h264",
-        sizeMb: addr.DataSize ? (addr.DataSize / (1024 * 1024)).toFixed(1) : null,
-        width: addr.Width || video.width || null,
-        height: addr.Height || video.height || null,
-      };
-    }
+    // Pisahkan stream kualitas Browser (h264) dan Phone (bytevc1/h264 tertinggi)
+    const bitrateList = Array.isArray(video.bitrateInfo) ? video.bitrateInfo : [];
+    const sorted = [...bitrateList].sort((a, b) => (b.Bitrate || 0) - (a.Bitrate || 0));
 
-    const width = bestStream?.width || video.width || null;
-    const height = bestStream?.height || video.height || null;
-    const durationSec = item.video?.duration || tw?.duration || 0;
-    const sizeBytes = tw?.hd_size || tw?.size || null;
-    const estBitrateMbps =
-      bestStream?.bitrateMbps ||
-      (sizeBytes && durationSec ? ((sizeBytes * 8) / durationSec / 1_000_000).toFixed(1) : null);
+    const topStream = sorted[0] || null;
+    const h264Stream = sorted.find((s) => (s.CodecType || "").toLowerCase().includes("h264")) || topStream;
+    const phoneStream = sorted.find((s) => (s.CodecType || "").toLowerCase().includes("bytevc")) || topStream;
+
+    const formatStreamLabel = (s) => {
+      if (!s) return null;
+      const w = s.PlayAddr?.Width || video.width;
+      const h = s.PlayAddr?.Height || video.height;
+      const resH = w && h ? Math.min(w, h) : null;
+      const fps = video.fps || (s.GearName?.includes("60") ? 60 : "");
+      return resH ? `${resH}p${fps}` : s.GearName;
+    };
+
+    const addr = topStream?.PlayAddr || {};
+    const width = addr.Width || video.width || null;
+    const height = addr.Height || video.height || null;
+    const durationSec = video.duration || tw?.duration || 0;
+    const sizeBytes = addr.DataSize || tw?.hd_size || tw?.size || null;
+    const estBitrateMbps = topStream?.Bitrate
+      ? (topStream.Bitrate / 1_000_000).toFixed(1)
+      : sizeBytes && durationSec
+      ? ((sizeBytes * 8) / durationSec / 1_000_000).toFixed(1)
+      : null;
+
+    // Cek sinyal pembatasan (Public Restriction Check)
+    let shadowStatus = "No (Public signals)";
+    if (!htmlData && tw) {
+      shadowStatus = "Unknown (Web HTML diblokir)";
+    } else if (item.privateItem || item.secret || item.forFriend) {
+      shadowStatus = "Yes (Private / Hidden)";
+    } else if (item.shareEnabled === false || item.itemControl?.can_share === false) {
+      shadowStatus = "Yes (Share Restricted)";
+    } else if (item.isContentClassified) {
+      shadowStatus = "Warning (Content Classified)";
+    }
 
     const payload = {
       ok: true,
@@ -100,22 +112,23 @@ exports.handler = async (event) => {
         },
         information: {
           id: item.id || tw?.id || "-",
-          source: item.video?.sourcePlatform || "Web / API",
+          source: video.sourcePlatform || (topStream?.GearName?.includes("original") ? "Browser / Original" : "TikTok"),
           region: item.locationCreated || tw?.region || "Unknown",
-          shadowBan: "N/A (Butuh API privat)",
+          shadowBan: shadowStatus,
         },
         quality: {
+          browser: formatStreamLabel(h264Stream) || (tw?.hdplay ? "1080p" : "540p"),
+          phone: formatStreamLabel(phoneStream) || (tw?.hdplay ? "1080p" : "540p"),
           resolution: width && height ? `${width}x${height}` : "Unknown",
-          fps: video.fps || (bestStream?.gearName?.includes("60") ? 60 : null),
-          gearName: bestStream?.gearName || (tw?.hdplay ? "hdplay (1080p)" : "play"),
+          fps: video.fps || (topStream?.GearName?.includes("60") ? 60 : null),
+          gearName: topStream?.GearName || (tw?.hdplay ? "hdplay" : "play"),
           bitrateMbps: estBitrateMbps,
-          codec: bestStream?.codec || "h264",
-          sizeMb: bestStream?.sizeMb || (sizeBytes ? (sizeBytes / (1024 * 1024)).toFixed(1) : null),
-          vqScore: video.VQScore ?? "N/A (Tidak diekspos publik)",
-          hdUrl: tw?.hdplay || tw?.play || null,
+          codec: topStream?.CodecType || "h264",
+          sizeMb: sizeBytes ? (sizeBytes / (1024 * 1024)).toFixed(1) : null,
+          vqScore: video.VQScore ?? "0",
         },
         categories: item.diversificationLabels || [],
-        note: "Catatan: Shadow ban & VQ Score penuh hanya tersedia via session/API privat TikTok seperti bot Telegram.",
+        note: "Status Shadow ban di atas dicek dari flag pembatasan publik TikTok (private/share/classified). Cek internal FYP butuh API privat TikTok.",
       },
     };
 
