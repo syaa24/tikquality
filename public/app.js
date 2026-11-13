@@ -13,6 +13,14 @@ const verifyResult = document.getElementById("verifyResult");
 let pyReady = false;
 let currentDownloadUrl = null;
 
+function esc(str) {
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 // Tabs
 document.querySelectorAll(".tab-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -104,19 +112,19 @@ inspectOnlyBtn.addEventListener("click", async () => {
 function infoCard(title, info, accentClass) {
   return `
     <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2 text-xs">
-      <div class="font-semibold text-sm ${accentClass}">${title}</div>
-      <div class="grid grid-cols-2 gap-y-1.5 text-slate-300 font-mono">
-        <span class="text-slate-400">Brand:</span><span>${info.brand}</span>
-        <span class="text-slate-400">Fast-Start (moov<mdat):</span><span>${info.fast_start ? "Yes" : "No"}</span>
-        <span class="text-slate-400">Resolusi:</span><span>${info.resolution}</span>
-        <span class="text-slate-400">FPS / Durasi:</span><span>${info.fps} fps • ${info.duration_sec}s</span>
-        <span class="text-slate-400">Real / Ghost Frames:</span><span>${info.real_frames} / +${info.ghost_frames}</span>
-        <span class="text-slate-400">Declared Frames:</span><span class="text-cyan-300 font-bold">${info.declared_frames}</span>
-        <span class="text-slate-400">Bitrate / Size:</span><span>${info.bitrate_mbps} Mbps • ${info.size_mb} MB</span>
+      <div class="font-semibold text-sm ${accentClass}">${esc(title)}</div>
+      <div class="grid grid-cols-2 gap-x-3 gap-y-1.5 text-slate-300 font-mono">
+        <span class="text-slate-400">Brand:</span><span>${esc(info.brand)}</span>
+        <span class="text-slate-400">Fast-Start (moov &lt; mdat):</span><span>${info.fast_start ? "Yes" : "No"}</span>
+        <span class="text-slate-400">Resolusi:</span><span>${esc(info.resolution)}</span>
+        <span class="text-slate-400">FPS / Durasi:</span><span>${esc(info.fps)} fps • ${esc(info.duration_sec)}s</span>
+        <span class="text-slate-400">Real / Ghost Frames:</span><span>${esc(info.real_frames)} / +${esc(info.ghost_frames)}</span>
+        <span class="text-slate-400">Declared Frames:</span><span class="text-cyan-300 font-bold">${esc(info.declared_frames)}</span>
+        <span class="text-slate-400">Bitrate / Size:</span><span>${esc(info.bitrate_mbps)} Mbps • ${esc(info.size_mb)} MB</span>
         <span class="text-slate-400">avcC High Ext:</span><span>${info.avcc_high_ext ? "Yes" : "No"}</span>
-        <span class="text-slate-400">Audio Handler:</span><span>${info.audio_handler}</span>
+        <span class="text-slate-400">Audio Handler:</span><span>${esc(info.audio_handler)}</span>
         <span class="text-slate-400">Padding NAL:</span><span>${info.has_padding_nal ? "Present (8B)" : "No"}</span>
-        <span class="text-slate-400">Comment Tag:</span><span class="truncate">${info.comment}</span>
+        <span class="text-slate-400">Comment Tag:</span><span class="truncate">${esc(info.comment)}</span>
       </div>
     </div>`;
 }
@@ -146,7 +154,7 @@ document.getElementById("checkUrlBtn").addEventListener("click", async () => {
     const res = await fetch(`/.netlify/functions/tiktok-check?url=${encodeURIComponent(url)}`);
     const json = await res.json();
     if (!json.ok) {
-      card.innerHTML = `<div class="text-rose-400">[!] ${json.error}</div>`;
+      card.innerHTML = `<div class="text-rose-400">[!] ${esc(json.error)}</div>`;
       return;
     }
 
@@ -157,8 +165,8 @@ document.getElementById("checkUrlBtn").addEventListener("click", async () => {
 
     card.innerHTML = `
       <div class="text-sky-400 font-bold">📹 VIDEO • ANALYTICS</div>
-      <div class="text-slate-300 text-xs">@${d.author.uniqueId} (${d.author.nickname}) • 📅 ${dateStr}</div>
-      <div class="text-sky-300">🎵 Sound • ${d.sound.title} (${d.sound.duration}s)</div>
+      <div class="text-slate-300 text-xs">@${esc(d.author.uniqueId)} (${esc(d.author.nickname)}) • 📅 ${esc(dateStr)}</div>
+      <div class="text-sky-300">🎵 Sound • ${esc(d.sound.title)} (${esc(d.sound.duration)}s)</div>
 
       <div class="space-y-1">
         <div class="font-bold text-white">📊 Statistics</div>
@@ -172,28 +180,30 @@ document.getElementById("checkUrlBtn").addEventListener("click", async () => {
 
       <div class="space-y-1">
         <div class="font-bold text-white">ℹ️ Information</div>
-        <div>• ID | <span class="text-sky-400">${d.information.id}</span></div>
-        <div>• Source | <span class="text-sky-400">${d.information.source}</span></div>
-        <div>• Region | <span class="text-sky-400">${d.information.region}</span></div>
-        <div>• Shadow ban | <span class="text-amber-300">${d.information.shadowBan}</span></div>
+        <div>• ID | <span class="text-sky-400">${esc(d.information.id)}</span></div>
+        <div>• Source | <span class="text-sky-400">${esc(d.information.source)}</span></div>
+        <div>• Region | <span class="text-sky-400">${esc(d.information.region)}</span></div>
+        <div>• Shadow ban | <span class="text-sky-400">${esc(d.information.shadowBan)}</span></div>
       </div>
 
       <div class="space-y-1">
         <div class="font-bold text-white">⭐ Quality</div>
-        <div class="bg-slate-900/80 border border-slate-700 rounded-lg p-3 space-y-1">
-          <div class="text-sky-400">🌐 📱 ${d.quality.gearName}</div>
-          <div>${d.quality.resolution}${d.quality.fps ? `p${d.quality.fps}` : ""} • ${d.quality.bitrateMbps || "?"} MBps • ${d.quality.codec} • ${d.quality.sizeMb || "?"} MB</div>
+        <div>• 🌐 Browser | <span class="text-sky-400">${esc(d.quality.browser || d.quality.resolution)}</span></div>
+        <div>• 📱 Phone | <span class="text-sky-400">${esc(d.quality.phone || d.quality.resolution)}</span></div>
+        <div class="bg-slate-900/80 border border-slate-700 rounded-lg p-3 space-y-1 mt-1">
+          <div class="text-sky-400">🌐 📱 play_addr 🌐 📱 ${esc(d.quality.gearName)}</div>
+          <div>${esc(d.quality.resolution)}${d.quality.fps ? `p${esc(d.quality.fps)}` : ""} • ${esc(d.quality.bitrateMbps || "?")} MBps • ${esc(d.quality.codec)} • ${esc(d.quality.sizeMb || "?")} MB</div>
         </div>
-        <div>| Original | <span class="text-sky-400">${d.quality.resolution}</span></div>
-        <div>| VQ Score | <span class="text-amber-300">${d.quality.vqScore}</span></div>
+        <div>| Original | <span class="text-sky-400">${esc(d.quality.resolution)}</span></div>
+        <div>| VQ Score | <span class="text-sky-400">${esc(d.quality.vqScore)}</span></div>
       </div>
 
-      ${d.categories.length ? `<div><div class="font-bold text-white">🏷 Categories</div>${d.categories.map(c => `<div>| <span class="text-sky-400">${c}</span></div>`).join("")}</div>` : ""}
+      ${d.categories && d.categories.length ? `<div><div class="font-bold text-white">🏷 Categories</div>${d.categories.map(c => `<div>| <span class="text-sky-400">${esc(c)}</span></div>`).join("")}</div>` : ""}
 
-      <div class="text-[11px] text-slate-400 pt-2 border-t border-slate-700">${d.note}</div>
+      <div class="text-[11px] text-slate-400 pt-2 border-t border-slate-700">${esc(d.note)}</div>
     `;
   } catch (err) {
-    card.innerHTML = `<div class="text-rose-400">[!] Error: ${err.message}</div>`;
+    card.innerHTML = `<div class="text-rose-400">[!] Error: ${esc(err.message)}</div>`;
   }
 });
 
