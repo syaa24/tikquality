@@ -13,10 +13,10 @@ async function initPyodide() {
 
   const files = [
     ["/py/tiktok_quality/__init__.py", "/home/pyodide/tiktok_quality/__init__.py"],
-    ["/py/tiktok_quality/transform.py", "/home/pyodide/tiktok_quality/transform.py"],
-    ["/py/tiktok_quality/mp4/__init__.py", "/home/pyodide/tiktok_quality/mp4/__init__.py"],
-    ["/py/tiktok_quality/mp4/parser.py", "/home/pyodide/tiktok_quality/mp4/parser.py"],
-    ["/py/tiktok_quality/mp4/builder.py", "/home/pyodide/tiktok_quality/mp4/builder.py"],
+    ["/py/tiktok_quality/transform.py", "/home/py/tiktok_quality/transform.py"],
+    ["/py/tiktok_quality/mp4/__init__.py", "/home/py/tiktok_quality/mp4/__init__.py"],
+    ["/py/tiktok_quality/mp4/parser.py", "/home/py/tiktok_quality/mp4/parser.py"],
+    ["/py/tiktok_quality/mp4/builder.py", "/home/py/tiktok_quality/mp4/builder.py"],
   ];
 
   for (const [url, dest] of files) {
@@ -44,12 +44,13 @@ def _debug_mp4_info(label, raw_bytes):
         stsc_pos, _ = find_box(raw_bytes, "stsc", sb_s, sb_e)
         stsd_pos, stsd_size = find_box(raw_bytes, "stsd", sb_s, sb_e)
         stsd_c = raw_bytes[stsd_pos + 8:stsd_pos + stsd_size]
+        codec = stsd_c[12:16].decode("latin-1", "replace") if len(stsd_c) >= 16 else "?"
         avcc_rel = stsd_c.find(b"avcC")
         avcc_len = read_u32(stsd_c, avcc_rel - 4) if avcc_rel >= 4 else 0
         avcc_tail = stsd_c[avcc_rel - 4 + avcc_len - 8:avcc_rel - 4 + avcc_len].hex() if avcc_len >= 8 else ""
         chunks = parse_stco(raw_bytes, stco_pos)
         stsc = parse_stsc(raw_bytes, stsc_pos)
-        print(f"[debug:{label}] chunks={len(chunks)}, stsc[:3]={stsc[:3]}, avcC_len={avcc_len}, avcC_tail={avcc_tail}")
+        print(f"[debug:{label}] codec={codec}, chunks={len(chunks)}, stsc[:3]={stsc[:3]}, avcC_len={avcc_len}, avcC_tail={avcc_tail}")
     except Exception as ex:
         print(f"[debug:{label}] {ex}")
 
@@ -66,11 +67,18 @@ def run_transform_web(input_bytes, multiplier, comment):
     sys.stderr = buf
     try:
         _debug_mp4_info("in", raw_in)
+        info_before = inspect_mp4_bytes(raw_in)
+        if not info_before["has_avcc"]:
+            return {
+                "ok": False,
+                "logs": buf.getvalue(),
+                "error": f"Codec video ini adalah '{info_before['codec']}' (bukan H.264/AVC). Tool ini hanya mendukung MP4 H.264 (avc1/avcC). Silakan export ulang ke H.264 (jangan HEVC/H.265)."
+            }
+
         stats = transform(in_path, out_path, multiplier=int(multiplier), comment=str(comment), verbose=True)
         with open(out_path, "rb") as f:
             out_bytes = f.read()
         _debug_mp4_info("out", out_bytes)
-        info_before = inspect_mp4_bytes(raw_in)
         info_after = inspect_mp4_bytes(out_bytes)
         return {
             "ok": True,
@@ -105,6 +113,8 @@ def inspect_mp4_bytes(data):
     width = height = fps = declared_frames = real_frames = ghost_frames = v_bitrate_mbps = 0
     duration_sec = 0.0
     avcc_ext = False
+    has_avcc = False
+    codec_fourcc = "?"
     comment_tag = "-"
 
     if vt_pos is not None:
@@ -129,9 +139,12 @@ def inspect_mp4_bytes(data):
         fps = round(timescale / delta, 2) if delta else 0
 
         stsd_content = data[stsd_pos + 8:stsd_pos + stsd_size]
+        if len(stsd_content) >= 16:
+            codec_fourcc = stsd_content[12:16].decode("latin-1", "replace")
         if len(stsd_content) >= 44:
             width = read_u16(stsd_content, 40)
             height = read_u16(stsd_content, 42)
+        has_avcc = (b"avcC" in stsd_content)
         avcc_ext = b"\\xfd\\xf8\\xf8\\x00" in stsd_content
         if duration_sec > 0:
             v_bytes = sum(s for s in sizes if s != 8)
@@ -160,6 +173,8 @@ def inspect_mp4_bytes(data):
         "size_bytes": size,
         "size_mb": round(size / (1024 * 1024), 2),
         "brand": brand,
+        "codec": codec_fourcc,
+        "has_avcc": has_avcc,
         "fast_start": fast_start,
         "resolution": f"{width}x{height}",
         "fps": fps,
