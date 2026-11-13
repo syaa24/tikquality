@@ -1,4 +1,4 @@
-const worker = new Worker("/worker.js?v=3");
+const worker = new Worker("/worker.js?v=4");
 
 const pyStatus = document.getElementById("pyStatus");
 const videoInput = document.getElementById("videoInput");
@@ -58,9 +58,9 @@ worker.onmessage = (e) => {
       "text-xs px-3 py-1.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 w-fit";
     updateButtons();
   } else if (msg.type === "error") {
-    pyStatus.textContent = "Error";
+    pyStatus.textContent = "Ditolak / Error";
     consoleLog.textContent = (msg.logs || "") + "\n[!] ERROR: " + msg.error;
-    transformBtn.disabled = false;
+    updateButtons();
   } else if (msg.type === "done") {
     pyStatus.textContent = "Selesai!";
     consoleLog.textContent = msg.logs;
@@ -120,7 +120,7 @@ function infoCard(title, info, accentClass) {
     <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2 text-xs">
       <div class="font-semibold text-sm ${accentClass}">${esc(title)}</div>
       <div class="grid grid-cols-2 gap-x-3 gap-y-1.5 text-slate-300 font-mono">
-        <span class="text-slate-400">Brand:</span><span>${esc(info.brand)}</span>
+        <span class="text-slate-400">Brand / Codec:</span><span>${esc(info.brand)} / ${esc(info.codec)} ${info.has_avcc ? "(H.264)" : "(Bukan H.264)"}</span>
         <span class="text-slate-400">Fast-Start (moov &lt; mdat):</span><span>${info.fast_start ? "Yes" : "No"}</span>
         <span class="text-slate-400">Resolusi:</span><span>${esc(info.resolution)}</span>
         <span class="text-slate-400">FPS / Durasi:</span><span>${esc(info.fps)} fps • ${esc(info.duration_sec)}s</span>
