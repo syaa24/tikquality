@@ -12,7 +12,7 @@
       <div>
         <h1 class="text-2xl font-bold tracking-tight text-white">TikTok Quality Web</h1>
         <p class="text-sm text-slate-400">
-          Zero re-encoding MP4 container manipulation (100% Python engine di browser)
+          Zero re-encoding MP4 container manipulation + Style &amp; Color Cloner (100% di browser)
         </p>
       </div>
       <span id="pyStatus" class="text-xs px-3 py-1.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 w-fit">
@@ -21,9 +21,12 @@
     </header>
 
     <!-- Tabs -->
-    <div class="flex gap-2 border-b border-slate-800 mb-6">
+    <div class="flex flex-wrap gap-2 border-b border-slate-800 mb-6">
       <button data-tab="enhancer" class="tab-btn px-4 py-2.5 text-sm font-medium border-b-2 border-cyan-400 text-cyan-300">
-        MP4 Enhancer & Verify
+        MP4 Enhancer &amp; Verify
+      </button>
+      <button data-tab="clone" class="tab-btn px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200">
+        Color &amp; Ratio Clone
       </button>
       <button data-tab="checker" class="tab-btn px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200">
         TikTok URL Checker
@@ -86,7 +89,95 @@
       </div>
     </section>
 
-    <!-- TAB 2: TIKTOK URL CHECKER -->
+    <!-- TAB 2: COLOR & RATIO CLONE -->
+    <section id="tab-clone" class="hidden space-y-5">
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-5">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-800 pb-3">
+          <div>
+            <h2 class="text-base font-semibold text-white">Tiru Color Grading &amp; Aspect Ratio Referensi</h2>
+            <p class="text-xs text-slate-400">Upload video referensi (yang mau ditiru) dan videomu, lalu proses menjadi 3D LUT + crop otomatis.</p>
+          </div>
+          <span id="ffmpegStatus" class="text-xs px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 w-fit">
+            FFmpeg Siap Dimuat
+          </span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="bg-slate-950 border border-slate-800 rounded-lg p-3.5 space-y-2">
+            <label class="block text-sm font-medium text-cyan-300">1. Video Referensi (Yang Ditiru)</label>
+            <input id="refVideoInput" type="file" accept="video/*"
+              class="block w-full text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-cyan-500/20 file:text-cyan-300 hover:file:bg-cyan-500/30 cursor-pointer" />
+            <div id="refInfo" class="text-xs font-mono text-slate-400">Belum dipilih</div>
+          </div>
+
+          <div class="bg-slate-950 border border-slate-800 rounded-lg p-3.5 space-y-2">
+            <label class="block text-sm font-medium text-emerald-300">2. Video Target (Videomu)</label>
+            <input id="targetVideoInput" type="file" accept="video/*"
+              class="block w-full text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-emerald-500/20 file:text-emerald-300 hover:file:bg-emerald-500/30 cursor-pointer" />
+            <div id="targetInfo" class="text-xs font-mono text-slate-400">Belum dipilih</div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Mode Aspect Ratio</label>
+            <select id="ratioModeSelect" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-cyan-500">
+              <option value="crop">Auto Crop Tengah (Persis Referensi)</option>
+              <option value="blur">Fit Penuh + Blur Background</option>
+              <option value="none">Pertahankan Rasio Asli Target</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">
+              Kekuatan Color Grading: <span id="lutStrengthVal" class="text-cyan-300 font-mono">85%</span>
+            </label>
+            <input id="lutStrengthInput" type="range" min="0" max="100" value="85"
+              class="w-full accent-cyan-400 mt-2 cursor-pointer" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Ketajaman (Sharpen)</label>
+            <select id="sharpenSelect" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-cyan-500">
+              <option value="0.5">Tipis (Natural HD)</option>
+              <option value="0.9">Kuat (Tajam Gaming)</option>
+              <option value="0">Matikan</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap gap-3 pt-1">
+          <button id="cloneRunBtn" disabled
+            class="px-5 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-semibold text-sm transition">
+            Clone Color &amp; Aspect Ratio
+          </button>
+          <a id="cloneDownloadBtn" class="hidden px-5 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-sm transition">
+            Download Hasil Clone
+          </a>
+          <button id="sendToEnhancerBtn" class="hidden px-5 py-2.5 rounded-lg bg-violet-500 hover:bg-violet-400 text-slate-950 font-semibold text-sm transition">
+            Lanjut ke MP4 Enhancer &rarr;
+          </button>
+        </div>
+      </div>
+
+      <!-- Preview Hasil Clone -->
+      <div id="clonePreviewBox" class="hidden grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+          <div class="text-xs font-semibold text-cyan-300 uppercase tracking-wider mb-2">Video Referensi</div>
+          <video id="refPreviewVideo" controls muted playsinline class="w-full max-h-[340px] rounded-lg bg-black"></video>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+          <div class="text-xs font-semibold text-emerald-300 uppercase tracking-wider mb-2">Hasil Clone (Color &amp; Ratio)</div>
+          <video id="cloneOutputVideo" controls playsinline class="w-full max-h-[340px] rounded-lg bg-black"></video>
+        </div>
+      </div>
+
+      <!-- Log Clone -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Console Log (Color &amp; FFmpeg)</div>
+        <pre id="cloneLog" class="text-xs font-mono text-cyan-300 whitespace-pre-wrap min-h-[80px]">Pilih Video Referensi dan Video Target...</pre>
+      </div>
+    </section>
+
+    <!-- TAB 3: TIKTOK URL CHECKER -->
     <section id="tab-checker" class="hidden space-y-5">
       <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
         <label class="block text-sm font-medium text-slate-300">Link Video TikTok (Sudah di-upload)</label>
@@ -102,7 +193,7 @@
       <div id="tiktokAnalyticsCard" class="hidden bg-[#17212b] border border-slate-700/70 rounded-xl p-5 font-mono text-sm space-y-4 shadow-xl"></div>
     </section>
 
-    <!-- TAB 3: BYTE COMPARE -->
+    <!-- TAB 4: BYTE COMPARE -->
     <section id="tab-compare" class="hidden space-y-4">
       <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
         <p class="text-sm text-slate-400">Bandingkan hasil web ini dengan file reference dari CLI Python untuk memastikan 100% byte-for-byte identik.</p>
@@ -124,6 +215,7 @@
     </section>
   </div>
 
-  <script src="/app.js?v=3"></script>
+  <script src="/app.js?v=4"></script>
+  <script src="/style-clone.js?v=1"></script>
 </body>
 </html>
